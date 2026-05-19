@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] – NMEA / AIS Parser</title>
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+<body>
+    <header>
+        <nav class="navbar">
+            <div class="brand">
+                <span class="brand-icon">⚓</span>
+                <span class="brand-name">NMEA / AIS Workbench</span>
+                <span class="brand-badge">v1.0</span>
+            </div>
+            <div class="nav-meta">ASP.NET Core MVC · Bit-accurate AIS encoding</div>
+        </nav>
+    </header>
+    <main>
+        @RenderBody()
+    </main>
+    <footer class="footer">
+        <span>NMEA 0183 &amp; AIS ITU-R M.1371-5 · Built with ASP.NET Core 8 MVC</span>
+    </footer>
+    <script src="~/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,485 @@
+@model NmeaAisParser.Models.HomeViewModel
+@{
+    ViewData["Title"] = "NMEA / AIS Parser";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+<div class="workspace">
+
+    <!-- ── TAB BAR ── -->
+    <div class="tab-bar" id="tabBar">
+        <button class="tab-btn @(Model.ActiveTab=="nmea"?"active":"")"     onclick="switchTab('nmea')">🔍 NMEA Parser</button>
+        <button class="tab-btn @(Model.ActiveTab=="type1gen"?"active":"")" onclick="switchTab('type1gen')">📡 Generate Type 1</button>
+        <button class="tab-btn @(Model.ActiveTab=="type5gen"?"active":"")" onclick="switchTab('type5gen')">🚢 Generate Type 5</button>
+        <button class="tab-btn @(Model.ActiveTab=="aisparse"?"active":"")" onclick="switchTab('aisparse')">🔎 AIS Parser</button>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         TAB 1 – NMEA PARSER
+    ═══════════════════════════════════════════ -->
+    <div class="tab-panel @(Model.ActiveTab=="nmea"?"active":"")" id="tab-nmea">
+        <div class="panel-header">
+            <h2>NMEA 0183 Sentence Parser</h2>
+            <p class="panel-sub">Paste any NMEA sentence (GGA, RMC, VTG, VDM, etc.) and decode every field.</p>
+        </div>
+        <form method="post" asp-action="ParseNmea">
+            <div class="input-group">
+                <label class="field-label">NMEA Sentence</label>
+                <div class="input-row">
+                    <input name="NmeaInput" class="mono-input" placeholder="$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"
+                           value="@Model.NmeaInput" />
+                    <button type="submit" class="btn-primary">Parse</button>
+                </div>
+                <div class="sample-pills">
+                    <span class="pill-label">Samples:</span>
+                    <button type="button" class="pill" onclick="setSample('nmea','$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47')">GGA</button>
+                    <button type="button" class="pill" onclick="setSample('nmea','$GPRMC,092204.999,A,4250.5589,S,14718.5084,E,0.00,89.68,211200,,*25')">RMC</button>
+                    <button type="button" class="pill" onclick="setSample('nmea','$GPVTG,089.0,T,,,15.2,N,28.2,K,*7F')">VTG</button>
+                    <button type="button" class="pill" onclick="setSample('nmea','!AIVDM,1,1,,A,15M67N0P00G?Uf6E`FepT@4n0000,0*73')">AIS VDM</button>
+                </div>
+            </div>
+
+            @if (Model.NmeaResult != null)
+            {
+                var r = Model.NmeaResult;
+                <div class="result-card @(r.IsValid ? "success" : "error")">
+                    <div class="result-header">
+                        <div class="result-title">
+                            @if (r.IsValid)
+                            { <span class="badge badge-ok">✓ Valid</span> }
+                            else
+                            { <span class="badge badge-err">✗ Invalid</span> }
+                            <span class="sentence-tag">@r.SentenceType</span>
+                        </div>
+                        <div class="checksum-pill @(r.ChecksumValid?"cs-ok":"cs-warn")">
+                            Checksum: @r.Checksum @(r.ChecksumValid ? "✓" : "⚠ mismatch")
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(r.ErrorMessage))
+                    { <div class="error-msg">@r.ErrorMessage</div> }
+
+                    <div class="meta-row">
+                        <div class="meta-item"><span class="meta-k">Talker ID</span><span class="meta-v">@(r.TalkerID.Length>0?r.TalkerID:"—")</span></div>
+                        <div class="meta-item"><span class="meta-k">Message</span><span class="meta-v">@r.MessageType</span></div>
+                        <div class="meta-item"><span class="meta-k">Raw</span><span class="meta-v mono-sm">@r.RawSentence</span></div>
+                    </div>
+
+                    @if (r.Fields.Count > 0)
+                    {
+                        <table class="data-table">
+                            <thead><tr><th>#</th><th>Field</th><th>Value</th></tr></thead>
+                            <tbody>
+                                @{int fi=1;}
+                                @foreach (var kv in r.Fields)
+                                {
+                                    <tr>
+                                        <td class="cell-n">@fi</td>
+                                        <td class="cell-k">@kv.Key</td>
+                                        <td class="cell-v mono-sm">@(kv.Value.Length>0?kv.Value:"<empty>")</td>
+                                    </tr>
+                                    fi++;
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            }
+        </form>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         TAB 2 – GENERATE AIS TYPE 1
+    ═══════════════════════════════════════════ -->
+    <div class="tab-panel @(Model.ActiveTab=="type1gen"?"active":"")" id="tab-type1gen">
+        <div class="panel-header">
+            <h2>Generate AIS Type 1 – Position Report Class A</h2>
+            <p class="panel-sub">Fill in the fields below to generate a bit-accurate AIS Type 1 NMEA sentence.</p>
+        </div>
+        <form method="post" asp-action="GenerateType1">
+            <div class="form-grid">
+                @Html.Hidden("ActiveTab", "type1gen")
+
+                <div class="form-group">
+                    <label>Message Type</label>
+                    <select name="Type1Input.MessageType" class="form-select">
+                        <option value="1" selected>1 – Position Report Class A</option>
+                        <option value="2">2 – Position Report Class A (Assigned)</option>
+                        <option value="3">3 – Position Report Class A (Response)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>MMSI</label>
+                    <input name="Type1Input.MMSI" type="number" class="form-input" value="@Model.Type1Input.MMSI" min="0" max="999999999" />
+                </div>
+                <div class="form-group">
+                    <label>Navigation Status</label>
+                    <select name="Type1Input.NavigationStatus" class="form-select">
+                        <option value="0">0 – Under way using engine</option>
+                        <option value="1">1 – At anchor</option>
+                        <option value="2">2 – Not under command</option>
+                        <option value="3">3 – Restricted manoeuvrability</option>
+                        <option value="4">4 – Constrained by draught</option>
+                        <option value="5">5 – Moored</option>
+                        <option value="6">6 – Aground</option>
+                        <option value="7">7 – Engaged in fishing</option>
+                        <option value="8">8 – Under way sailing</option>
+                        <option value="15">15 – Undefined</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Rate of Turn (ROT) <span class="hint">-128=no info</span></label>
+                    <input name="Type1Input.RateOfTurn" type="number" class="form-input" value="@Model.Type1Input.RateOfTurn" min="-128" max="127" />
+                </div>
+                <div class="form-group">
+                    <label>Speed Over Ground (knots) <span class="hint">0–102.2</span></label>
+                    <input name="Type1Input.SpeedOverGround" type="number" step="0.1" class="form-input" value="@Model.Type1Input.SpeedOverGround" min="0" max="102.2" />
+                </div>
+                <div class="form-group">
+                    <label>Position Accuracy</label>
+                    <select name="Type1Input.PositionAccuracy" class="form-select">
+                        <option value="0">0 – Low (&gt;10m)</option>
+                        <option value="1">1 – High (&lt;10m)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Longitude (°) <span class="hint">-180 to 180</span></label>
+                    <input name="Type1Input.Longitude" type="number" step="0.000001" class="form-input" value="@Model.Type1Input.Longitude" min="-180" max="180" />
+                </div>
+                <div class="form-group">
+                    <label>Latitude (°) <span class="hint">-90 to 90</span></label>
+                    <input name="Type1Input.Latitude" type="number" step="0.000001" class="form-input" value="@Model.Type1Input.Latitude" min="-90" max="90" />
+                </div>
+                <div class="form-group">
+                    <label>Course Over Ground (°) <span class="hint">0–359.9</span></label>
+                    <input name="Type1Input.CourseOverGround" type="number" step="0.1" class="form-input" value="@Model.Type1Input.CourseOverGround" min="0" max="359.9" />
+                </div>
+                <div class="form-group">
+                    <label>True Heading (°) <span class="hint">0–359, 511=N/A</span></label>
+                    <input name="Type1Input.TrueHeading" type="number" class="form-input" value="@Model.Type1Input.TrueHeading" min="0" max="511" />
+                </div>
+                <div class="form-group">
+                    <label>Timestamp (s) <span class="hint">0–59, 60=N/A</span></label>
+                    <input name="Type1Input.TimeStamp" type="number" class="form-input" value="@Model.Type1Input.TimeStamp" min="0" max="63" />
+                </div>
+                <div class="form-group">
+                    <label>Maneuver Indicator</label>
+                    <select name="Type1Input.ManeuverIndicator" class="form-select">
+                        <option value="0">0 – Not available</option>
+                        <option value="1">1 – No special maneuver</option>
+                        <option value="2">2 – Special maneuver</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>RAIM Flag</label>
+                    <select name="Type1Input.RAIMFlag" class="form-select">
+                        <option value="0">0 – Not in use</option>
+                        <option value="1">1 – In use</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Repeat Indicator</label>
+                    <input name="Type1Input.RepeatIndicator" type="number" class="form-input" value="@Model.Type1Input.RepeatIndicator" min="0" max="3" />
+                </div>
+            </div>
+            <button type="submit" class="btn-primary btn-full">Generate AIS Type 1 Sentence</button>
+        </form>
+
+        @if (Model.Type1Result != null)
+        {
+            var r = Model.Type1Result;
+            <div class="result-card @(r.IsValid?"success":"error")">
+                @if (!r.IsValid) { <div class="error-msg">@r.ErrorMessage</div> }
+                else
+                {
+                    <div class="result-header"><span class="badge badge-ok">✓ Generated</span><span class="sentence-tag">AIS Type @r.MessageType</span></div>
+                    <div class="nmea-output">
+                        <div class="nmea-label">NMEA Sentence</div>
+                        <div class="nmea-value">@r.NmeaSentence</div>
+                        <button class="copy-btn" onclick="copyText('@r.NmeaSentence')">Copy</button>
+                    </div>
+                    <div class="binary-row">
+                        <div class="binary-label">Encoded Payload</div>
+                        <div class="binary-value">@r.EncodedPayload</div>
+                    </div>
+                    <div class="binary-row">
+                        <div class="binary-label">Binary (168 bits)</div>
+                        <div class="binary-value binary-bits">@r.BinaryPayload</div>
+                    </div>
+                    <h4 class="decoded-title">Decoded Fields</h4>
+                    <table class="data-table">
+                        <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                        <tbody>
+                            <tr><td>Message Type</td><td>@r.MessageType</td></tr>
+                            <tr><td>Repeat Indicator</td><td>@r.RepeatIndicator</td></tr>
+                            <tr><td>MMSI</td><td>@r.MMSI</td></tr>
+                            <tr><td>Navigation Status</td><td>@r.NavigationStatus</td></tr>
+                            <tr><td>Rate of Turn</td><td>@r.RateOfTurn</td></tr>
+                            <tr><td>Speed Over Ground</td><td>@r.SpeedOverGround kn</td></tr>
+                            <tr><td>Position Accuracy</td><td>@(r.PositionAccuracy==1?"High (<10m)":"Low (>10m)")</td></tr>
+                            <tr><td>Longitude</td><td>@r.Longitude.ToString("F6")°</td></tr>
+                            <tr><td>Latitude</td><td>@r.Latitude.ToString("F6")°</td></tr>
+                            <tr><td>Course Over Ground</td><td>@r.CourseOverGround°</td></tr>
+                            <tr><td>True Heading</td><td>@(r.TrueHeading==511?"N/A":r.TrueHeading+"°")</td></tr>
+                            <tr><td>Timestamp</td><td>@(r.TimeStamp==60?"N/A":r.TimeStamp+"s")</td></tr>
+                            <tr><td>Maneuver Indicator</td><td>@r.ManeuverIndicator</td></tr>
+                            <tr><td>RAIM Flag</td><td>@(r.RAIMFlag==1?"In use":"Not in use")</td></tr>
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         TAB 3 – GENERATE AIS TYPE 5
+    ═══════════════════════════════════════════ -->
+    <div class="tab-panel @(Model.ActiveTab=="type5gen"?"active":"")" id="tab-type5gen">
+        <div class="panel-header">
+            <h2>Generate AIS Type 5 – Static &amp; Voyage Data</h2>
+            <p class="panel-sub">Generates two NMEA sentences (Type 5 is 426 bits, split across 2 VDM messages).</p>
+        </div>
+        <form method="post" asp-action="GenerateType5">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>MMSI</label>
+                    <input name="Type5Input.MMSI" type="number" class="form-input" value="@Model.Type5Input.MMSI" />
+                </div>
+                <div class="form-group">
+                    <label>IMO Number</label>
+                    <input name="Type5Input.IMONumber" type="number" class="form-input" value="@Model.Type5Input.IMONumber" />
+                </div>
+                <div class="form-group">
+                    <label>Call Sign <span class="hint">max 7 chars</span></label>
+                    <input name="Type5Input.CallSign" class="form-input" value="@Model.Type5Input.CallSign" maxlength="7" />
+                </div>
+                <div class="form-group">
+                    <label>Vessel Name <span class="hint">max 20 chars</span></label>
+                    <input name="Type5Input.VesselName" class="form-input" value="@Model.Type5Input.VesselName" maxlength="20" />
+                </div>
+                <div class="form-group">
+                    <label>Ship Type</label>
+                    <select name="Type5Input.ShipType" class="form-select">
+                        <option value="0">0 – Not available</option>
+                        <option value="30">30 – Fishing</option>
+                        <option value="31">31 – Towing</option>
+                        <option value="36">36 – Sailing</option>
+                        <option value="37">37 – Pleasure Craft</option>
+                        <option value="50">50 – Pilot Vessel</option>
+                        <option value="51">51 – SAR</option>
+                        <option value="52">52 – Tug</option>
+                        <option value="60">60 – Passenger</option>
+                        <option value="70" selected>70 – Cargo</option>
+                        <option value="71">71 – Cargo Hazard A</option>
+                        <option value="80">80 – Tanker</option>
+                        <option value="89">89 – Tanker No Info</option>
+                        <option value="90">90 – Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>EPFD Type</label>
+                    <select name="Type5Input.TypeOfEPFD" class="form-select">
+                        <option value="0">0 – Undefined</option>
+                        <option value="1" selected>1 – GPS</option>
+                        <option value="2">2 – GLONASS</option>
+                        <option value="3">3 – Combined GPS/GLONASS</option>
+                        <option value="4">4 – Loran-C</option>
+                        <option value="7">7 – Surveyed</option>
+                        <option value="8">8 – Galileo</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Max Draught (m) <span class="hint">0–25.5</span></label>
+                    <input name="Type5Input.MaxDraught" type="number" step="0.1" class="form-input" value="@Model.Type5Input.MaxDraught" min="0" max="25.5" />
+                </div>
+                <div class="form-group">
+                    <label>Destination <span class="hint">max 20 chars</span></label>
+                    <input name="Type5Input.Destination" class="form-input" value="@Model.Type5Input.Destination" maxlength="20" />
+                </div>
+                <div class="form-group">
+                    <label>ETA Month</label>
+                    <input name="Type5Input.ETAMonth" type="number" class="form-input" value="@Model.Type5Input.ETAMonth" min="0" max="12" />
+                </div>
+                <div class="form-group">
+                    <label>ETA Day</label>
+                    <input name="Type5Input.ETADay" type="number" class="form-input" value="@Model.Type5Input.ETADay" min="0" max="31" />
+                </div>
+                <div class="form-group">
+                    <label>ETA Hour <span class="hint">24=N/A</span></label>
+                    <input name="Type5Input.ETAHour" type="number" class="form-input" value="@Model.Type5Input.ETAHour" min="0" max="24" />
+                </div>
+                <div class="form-group">
+                    <label>ETA Minute <span class="hint">60=N/A</span></label>
+                    <input name="Type5Input.ETAMinute" type="number" class="form-input" value="@Model.Type5Input.ETAMinute" min="0" max="60" />
+                </div>
+                <div class="form-group">
+                    <label>Dim to Bow (m)</label>
+                    <input name="Type5Input.DimensionToBow" type="number" class="form-input" value="@Model.Type5Input.DimensionToBow" min="0" max="511" />
+                </div>
+                <div class="form-group">
+                    <label>Dim to Stern (m)</label>
+                    <input name="Type5Input.DimensionToStern" type="number" class="form-input" value="@Model.Type5Input.DimensionToStern" min="0" max="511" />
+                </div>
+                <div class="form-group">
+                    <label>Dim to Port (m)</label>
+                    <input name="Type5Input.DimensionToPort" type="number" class="form-input" value="@Model.Type5Input.DimensionToPort" min="0" max="63" />
+                </div>
+                <div class="form-group">
+                    <label>Dim to Starboard (m)</label>
+                    <input name="Type5Input.DimensionToStarboard" type="number" class="form-input" value="@Model.Type5Input.DimensionToStarboard" min="0" max="63" />
+                </div>
+                <div class="form-group">
+                    <label>AIS Version</label>
+                    <select name="Type5Input.AisVersion" class="form-select">
+                        <option value="0">0 – ITU-R M.1371-1</option>
+                        <option value="1">1 – ITU-R M.1371-3</option>
+                        <option value="2">2 – ITU-R M.1371-5</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>DTE</label>
+                    <select name="Type5Input.DTE" class="form-select">
+                        <option value="0">0 – Available</option>
+                        <option value="1">1 – Not available</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Repeat Indicator</label>
+                    <input name="Type5Input.RepeatIndicator" type="number" class="form-input" value="@Model.Type5Input.RepeatIndicator" min="0" max="3" />
+                </div>
+            </div>
+            <button type="submit" class="btn-primary btn-full">Generate AIS Type 5 Sentences</button>
+        </form>
+
+        @if (Model.Type5Result != null)
+        {
+            var r = Model.Type5Result;
+            <div class="result-card @(r.IsValid?"success":"error")">
+                @if (!r.IsValid) { <div class="error-msg">@r.ErrorMessage</div> }
+                else
+                {
+                    <div class="result-header"><span class="badge badge-ok">✓ Generated (2 sentences)</span><span class="sentence-tag">AIS Type 5</span></div>
+                    @foreach (var (s, idx) in r.NmeaSentences.Select((s,i)=>(s,i+1)))
+                    {
+                        <div class="nmea-output">
+                            <div class="nmea-label">Sentence @idx</div>
+                            <div class="nmea-value">@s</div>
+                            <button class="copy-btn" onclick="copyText('@s')">Copy</button>
+                        </div>
+                    }
+                    <div class="binary-row">
+                        <div class="binary-label">Combined Payload (@r.BinaryPayload.Length bits)</div>
+                        <div class="binary-value binary-bits">@r.BinaryPayload</div>
+                    </div>
+                    <h4 class="decoded-title">Decoded Fields</h4>
+                    <table class="data-table">
+                        <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                        <tbody>
+                            <tr><td>Message Type</td><td>@r.MessageType</td></tr>
+                            <tr><td>MMSI</td><td>@r.MMSI</td></tr>
+                            <tr><td>AIS Version</td><td>@r.AisVersion</td></tr>
+                            <tr><td>IMO Number</td><td>@r.IMONumber</td></tr>
+                            <tr><td>Call Sign</td><td>@r.CallSign</td></tr>
+                            <tr><td>Vessel Name</td><td>@r.VesselName</td></tr>
+                            <tr><td>Ship Type</td><td>@r.ShipType</td></tr>
+                            <tr><td>Dimensions (B/S/P/SB m)</td><td>@r.DimensionToBow / @r.DimensionToStern / @r.DimensionToPort / @r.DimensionToStarboard</td></tr>
+                            <tr><td>EPFD Type</td><td>@r.TypeOfEPFD</td></tr>
+                            <tr><td>ETA</td><td>@r.ETA</td></tr>
+                            <tr><td>Max Draught</td><td>@r.MaxDraught m</td></tr>
+                            <tr><td>Destination</td><td>@r.Destination</td></tr>
+                            <tr><td>DTE</td><td>@(r.DTE==0?"Available":"Not available")</td></tr>
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         TAB 4 – AIS PARSER
+    ═══════════════════════════════════════════ -->
+    <div class="tab-panel @(Model.ActiveTab=="aisparse"?"active":"")" id="tab-aisparse">
+        <div class="panel-header">
+            <h2>AIS Sentence Parser</h2>
+            <p class="panel-sub">Paste one (Type 1/2/3) or two (Type 5) NMEA VDM sentences. Auto-detects message type.</p>
+        </div>
+        <form method="post" asp-action="ParseAis">
+            <div class="input-group">
+                <label class="field-label">NMEA VDM Sentence(s)</label>
+                <textarea name="AisParseInput" class="mono-textarea" rows="3"
+                          placeholder="!AIVDM,1,1,,A,...,0*XX&#10;For Type 5: paste both sentences on separate lines">@Model.AisParseInput</textarea>
+                <div class="sample-pills">
+                    <span class="pill-label">Samples:</span>
+                    <button type="button" class="pill" onclick="setSampleTA('!AIVDM,1,1,,A,15M67N0P00G?Uf6E`FepT@4n0000,0*73')">Type 1</button>
+                    <button type="button" class="pill" onclick="setSampleTA('!AIVDM,2,1,3,B,55?MbV02<h4eL4LE800l4p4r@Tp0000000000l1@T554400Ht0000000000,0*1B\n!AIVDM,2,2,3,B,00000000000,2*25')">Type 5</button>
+                </div>
+                <button type="submit" class="btn-primary" style="margin-top:12px">Parse AIS</button>
+            </div>
+        </form>
+
+        @if (Model.AisParseResult != null && Model.AisParseType == "type1")
+        {
+            var r = (NmeaAisParser.Models.AisType1Result)Model.AisParseResult;
+            <div class="result-card @(r.IsValid?"success":"error")">
+                @if (!r.IsValid) { <div class="error-msg">@r.ErrorMessage</div> }
+                else
+                {
+                    <div class="result-header"><span class="badge badge-ok">✓ AIS Type @r.MessageType – Position Report</span></div>
+                    <table class="data-table">
+                        <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                        <tbody>
+                            <tr><td>MMSI</td><td>@r.MMSI</td></tr>
+                            <tr><td>Navigation Status</td><td>@r.NavigationStatus</td></tr>
+                            <tr><td>Rate of Turn</td><td>@r.RateOfTurn</td></tr>
+                            <tr><td>Speed Over Ground</td><td>@r.SpeedOverGround kn</td></tr>
+                            <tr><td>Position Accuracy</td><td>@(r.PositionAccuracy==1?"High (<10m)":"Low (>10m)")</td></tr>
+                            <tr><td>Longitude</td><td>@r.Longitude.ToString("F6")°</td></tr>
+                            <tr><td>Latitude</td><td>@r.Latitude.ToString("F6")°</td></tr>
+                            <tr><td>Course Over Ground</td><td>@r.CourseOverGround°</td></tr>
+                            <tr><td>True Heading</td><td>@(r.TrueHeading==511?"N/A":r.TrueHeading+"°")</td></tr>
+                            <tr><td>Timestamp</td><td>@(r.TimeStamp==60?"N/A":r.TimeStamp+"s")</td></tr>
+                            <tr><td>Maneuver Indicator</td><td>@r.ManeuverIndicator</td></tr>
+                            <tr><td>RAIM</td><td>@(r.RAIMFlag==1?"In use":"Not in use")</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="binary-row"><div class="binary-label">Payload</div><div class="binary-value">@r.EncodedPayload</div></div>
+                }
+            </div>
+        }
+
+        @if (Model.AisParseResult != null && Model.AisParseType == "type5")
+        {
+            var r = (NmeaAisParser.Models.AisType5Result)Model.AisParseResult;
+            <div class="result-card @(r.IsValid?"success":"error")">
+                @if (!r.IsValid) { <div class="error-msg">@r.ErrorMessage</div> }
+                else
+                {
+                    <div class="result-header"><span class="badge badge-ok">✓ AIS Type 5 – Static &amp; Voyage Data</span></div>
+                    <table class="data-table">
+                        <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                        <tbody>
+                            <tr><td>MMSI</td><td>@r.MMSI</td></tr>
+                            <tr><td>AIS Version</td><td>@r.AisVersion</td></tr>
+                            <tr><td>IMO Number</td><td>@r.IMONumber</td></tr>
+                            <tr><td>Call Sign</td><td>@r.CallSign</td></tr>
+                            <tr><td>Vessel Name</td><td>@r.VesselName</td></tr>
+                            <tr><td>Ship Type</td><td>@r.ShipType</td></tr>
+                            <tr><td>EPFD Type</td><td>@r.TypeOfEPFD</td></tr>
+                            <tr><td>ETA</td><td>@r.ETA</td></tr>
+                            <tr><td>Max Draught</td><td>@r.MaxDraught m</td></tr>
+                            <tr><td>Destination</td><td>@r.Destination</td></tr>
+                            <tr><td>DTE</td><td>@(r.DTE==0?"Available":"Not available")</td></tr>
+                            <tr><td>Dimensions (B/S/P/SB m)</td><td>@r.DimensionToBow / @r.DimensionToStern / @r.DimensionToPort / @r.DimensionToStarboard</td></tr>
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
+
+        @if (Model.AisParseType == "unknown")
+        {
+            <div class="result-card error"><div class="error-msg">Unsupported AIS message type. This tool supports Type 1, 2, 3, and 5.</div></div>
+        }
+    </div>
+
+</div>
