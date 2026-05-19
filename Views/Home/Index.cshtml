@@ -359,7 +359,7 @@
                 else
                 {
                     <div class="result-header"><span class="badge badge-ok">✓ Generated (2 sentences)</span><span class="sentence-tag">AIS Type 5</span></div>
-                    @foreach (var (s, idx) in r.NmeaSentences.Select((s,i)=>(s,i+1)))
+                    foreach (var (s, idx) in r.NmeaSentences.Select((s,i)=>(s,i+1)))
                     {
                         <div class="nmea-output">
                             <div class="nmea-label">Sentence @idx</div>
