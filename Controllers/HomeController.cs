@@ -6,17 +6,14 @@ namespace NmeaAisParser.Controllers
 {
     public class HomeController : Controller
     {
-        public IActionResult Index()
-        {
-            return View(new HomeViewModel());
-        }
+        public IActionResult Index() => View(new HomeViewModel());
 
         [HttpPost]
         public IActionResult ParseNmea(HomeViewModel vm)
         {
             vm.ActiveTab = "nmea";
             if (!string.IsNullOrWhiteSpace(vm.NmeaInput))
-                vm.NmeaResult = NmeaParser.Parse(vm.NmeaInput);
+                vm.NmeaResult = NmeaParser.Parse(vm.NmeaInput.Trim());
             return View("Index", vm);
         }
 
@@ -40,59 +37,94 @@ namespace NmeaAisParser.Controllers
         public IActionResult ParseAis(HomeViewModel vm)
         {
             vm.ActiveTab = "aisparse";
-            if (!string.IsNullOrWhiteSpace(vm.AisParseInput))
+
+            if (string.IsNullOrWhiteSpace(vm.AisParseInput))
+                return View("Index", vm);
+
+            // Split into non-empty trimmed lines
+            var lines = vm.AisParseInput
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => l.Trim())
+                .Where(l => l.Length > 0)
+                .ToArray();
+
+            if (lines.Length == 0)
+                return View("Index", vm);
+
+            string first = lines[0];
+
+            try
             {
-                var lines = vm.AisParseInput.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                if (lines.Length == 0) return View("Index", vm);
-
-                // Detect message type from payload
-                string first = lines[0].Trim();
+                // Parse the first sentence to extract the payload
                 var nmea = NmeaParser.Parse(first);
-                string payload = "";
-                if (nmea.Fields.TryGetValue("Field 5", out var p)) payload = p;
-
-                if (payload.Length > 0)
+                if (!nmea.IsValid)
                 {
-                    string binary = AisBitEncoder.PayloadToBinary(payload);
-                    int msgType = (int)AisBitEncoder.ReadUInt(binary, 0, 6);
+                    vm.AisParseResult = new AisType1Result { ErrorMessage = $"Invalid NMEA: {nmea.ErrorMessage}" };
+                    vm.AisParseType = "error";
+                    return View("Index", vm);
+                }
 
-                    if (msgType is 1 or 2 or 3)
+                // Extract payload using the robust helper
+                var (payload, _) = NmeaParser.ExtractPayloadAndFill(nmea);
+
+                if (string.IsNullOrEmpty(payload))
+                {
+                    vm.AisParseResult = new AisType1Result { ErrorMessage = "No AIS payload found in the sentence." };
+                    vm.AisParseType = "error";
+                    return View("Index", vm);
+                }
+
+                // Peek at message type (first 6 bits)
+                var peekBits = AisBits.Decode(payload, 0);
+                if (peekBits.Count < 6)
+                {
+                    vm.AisParseResult = new AisType1Result { ErrorMessage = "Payload is too short to determine message type." };
+                    vm.AisParseType = "error";
+                    return View("Index", vm);
+                }
+
+                int msgType = (int)AisBits.ReadUInt(peekBits, 0, 6);
+
+                if (msgType is 1 or 2 or 3)
+                {
+                    vm.AisParseResult = AisType1Service.Parse(first);
+                    vm.AisParseType = "type1";
+                }
+                else if (msgType == 5)
+                {
+                    string second = lines.Length > 1 ? lines[1] : "";
+                    vm.AisParseResult = AisType5Service.Parse(first, second);
+                    vm.AisParseType = "type5";
+                }
+                else
+                {
+                    vm.AisParseResult = new AisType1Result
                     {
-                        vm.AisParseResult = AisType1Service.Parse(first);
-                        vm.AisParseType = "type1";
-                    }
-                    else if (msgType == 5)
-                    {
-                        string second = lines.Length > 1 ? lines[1].Trim() : "";
-                        vm.AisParseResult = AisType5Service.Parse(first, second);
-                        vm.AisParseType = "type5";
-                    }
-                    else
-                    {
-                        vm.AisParseType = "unknown";
-                    }
+                        ErrorMessage = $"AIS message type {msgType} is not supported. This tool handles Type 1, 2, 3, and 5."
+                    };
+                    vm.AisParseType = "error";
                 }
             }
+            catch (Exception ex)
+            {
+                vm.AisParseResult = new AisType1Result { ErrorMessage = $"Unexpected error: {ex.Message}" };
+                vm.AisParseType = "error";
+            }
+
             return View("Index", vm);
         }
 
-        // API endpoints for JSON results
+        // JSON API endpoints
         [HttpPost]
-        public IActionResult ApiParseNmea([FromBody] string sentence)
-        {
-            return Json(NmeaParser.Parse(sentence));
-        }
+        public IActionResult ApiParseNmea([FromBody] string sentence) =>
+            Json(NmeaParser.Parse(sentence));
 
         [HttpPost]
-        public IActionResult ApiGenerateType1([FromBody] AisType1Input input)
-        {
-            return Json(AisType1Service.Generate(input));
-        }
+        public IActionResult ApiGenerateType1([FromBody] AisType1Input input) =>
+            Json(AisType1Service.Generate(input));
 
         [HttpPost]
-        public IActionResult ApiGenerateType5([FromBody] AisType5Input input)
-        {
-            return Json(AisType5Service.Generate(input));
-        }
+        public IActionResult ApiGenerateType5([FromBody] AisType5Input input) =>
+            Json(AisType5Service.Generate(input));
     }
 }
